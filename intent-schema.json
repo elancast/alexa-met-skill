@@ -1,0 +1,16 @@
+{
+  "intents": [
+    {
+      "slots": [
+        {
+          "name": "Date",
+          "type": "AMAZON.DATE"
+        }
+      ],
+      "intent": "GetNextExhibits"
+    },
+    {
+      "intent": "AMAZON.HelpIntent"
+    }
+  ]
+}
