@@ -13,11 +13,20 @@ import urllib2
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 APP_ID = 'amzn1.ask.skill.31de1985-df73-45f5-bb6a-22a5c62b2c43'
-BAD_DATE = 'I didn\'t understand what date you asked for. Try asking for a specific date or month.'
-HELP = 'To learn about ongoing Met Exhibits, ask me about the next exhibits or the next exhibits after a date'
+BAD_DATE_OUTPUT = 'I didn\'t understand what date you asked for. Try asking for a specific date or month.'
+DATE_SLOT_NAME = 'Date'
+INTENT_NAME = 'GetNextExhibits'
+LAUNCH_OUTPUT = ''
+LAUNCH_REPROMPT = 'What date would you like to know about Met exhibits after?'
+HELP_OUTPUT = 'Met Exhibits tells you the special exhibitions at the Metropolitan Museum of Art that are ending soon. To try it, ask me about the next exhibits or the next exhibits ending after a date.'
+HELP_REPROMPT = 'When would you like to know about exhibits ending after?'
 TITLE = 'Met Exhibits'
 
+BAD_DATE_REPROMPT = LAUNCH_REPROMPT
+
 def lambda_handler(event, context):
+    print('here in lambda handler')
+    print(json.dumps(event))
     if event['session']['application']['applicationId'] != APP_ID:
         raise ValueError('Invalid Application ID')
 
@@ -25,21 +34,23 @@ def lambda_handler(event, context):
     if request_type == 'LaunchRequest':
         return on_launch_request(event['request'])
     elif request_type == 'IntentRequest':
-        return on_intent_request(event['request'])
+        return on_intent_request(event['request'], event['session']['new'])
     elif request_type == 'SessionEndedRequest':
         return
     else:
         return on_error(Exception('Unknown request type: ' + request_type))
 
 def on_launch_request(request):
-    return on_help_intent()
+    return on_launch_intent()
 
-def on_intent_request(request):
+def on_intent_request(request, is_new_session):
     intent_type = request['intent']['name']
-    if intent_type == 'GetNextExhibits':
-        return on_exhibits_intent(request['intent'])
+    if intent_type == INTENT_NAME:
+        return on_exhibits_intent(request['intent'], is_new_session)
     elif intent_type == 'AMAZON.HelpIntent':
         return on_help_intent()
+    elif intent_type == 'AMAZON.StopIntent':
+        return build_simple_response('Okay.')
     else:
         return on_error(Exception('Unknown intent type: ' + intent_type))
 
@@ -48,18 +59,27 @@ def on_intent_request(request):
 # Alexa <-> Custom logic - this handles converting between speech and logic
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-def on_exhibits_intent(intent):
+def on_exhibits_intent(intent, is_new_session):
   slots = intent['slots']
-  if 'Date' in slots and 'value' in slots['Date']:
-    date = parse_date(slots['Date']['value'])
+  has_date = DATE_SLOT_NAME in slots and 'value' in slots[DATE_SLOT_NAME]
+  if has_date:
+    date = parse_date(slots[DATE_SLOT_NAME]['value'])
     if not date:
-      return build_simple_response(BAD_DATE)
+      return on_bad_date()
     return build_listings_response(get_exhibits_ending_after_date(date), date)
+  elif not is_new_session and not has_date:
+    return on_bad_date()
   else:
     return build_listings_response(get_next_ending_exhibits())
 
+def on_bad_date():
+  return build_open_response(BAD_DATE_OUTPUT, BAD_DATE_REPROMPT)
+
 def on_help_intent():
-  return build_simple_response(HELP)
+  return build_open_response(HELP_OUTPUT, HELP_REPROMPT)
+
+def on_launch_intent():
+  return build_open_response(LAUNCH_OUTPUT, LAUNCH_REPROMPT)
 
 def on_error(exc):
   text = 'There was an error: ' + exc.message
@@ -79,13 +99,13 @@ def parse_date(date_text):
     if date_text == this_month_bug:
       return one_day_ago
 
-    # This year
-    if not '-' in date_text:
-      return one_day_ago
+    fmt = '%Y'
+    if date_text.count('-') == 1:
+      fmt = '%Y-%m'
+    elif date_text.count('-') == 2:
+      fmt = '%Y-%m-%d'
 
-    # TODO: Handle months / weeks
     try:
-      fmt = '%Y-%m-%d' if date_text.count('-') > 1 else '%Y-%m'
       return datetime.datetime.strptime(date_text, fmt)
     except:
       print('Unexpected date: ' + date_text)
@@ -104,10 +124,33 @@ def build_listings_response(listings, date=None):
   return build_simple_response(text)
 
 def build_simple_response(text):
-  speechlet = build_speechlet_response(TITLE, text, None, True)
+  speechlet = build_speechlet_response(TITLE, text)
   return build_response({}, speechlet)
 
-def build_speechlet_response(title, output, reprompt_text, should_end_session):
+def build_open_response(output_text, reprompt_text):
+  return build_response(
+    {},
+    {
+        'outputSpeech': {
+             'type': 'PlainText',
+             'text': output_text + ' ' + reprompt_text
+             },
+        'card': {
+          'type': 'Simple',
+          'title': 'SessionSpeechlet',
+          'content': 'SessionSpeechlet'
+          },
+        'reprompt': {
+            'outputSpeech': {
+                'type': 'PlainText',
+                'text': reprompt_text
+                }
+            },
+        'shouldEndSession': False
+        }
+    )
+
+def build_speechlet_response(title, output):
   return {
     'outputSpeech': {
       'type': 'PlainText',
@@ -121,10 +164,10 @@ def build_speechlet_response(title, output, reprompt_text, should_end_session):
     'reprompt': {
       'outputSpeech': {
         'type': 'PlainText',
-        'text': reprompt_text
+        'text': None
         }
       },
-    'shouldEndSession': should_end_session
+    'shouldEndSession': True
     }
 
 def build_response(session_attributes, speechlet_response):
@@ -141,14 +184,27 @@ def build_response(session_attributes, speechlet_response):
 LIMIT = 3
 
 def get_next_ending_exhibits():
-  return _get_sorted_exhibit_listings()[:LIMIT]
+  return _take_limit(_get_sorted_exhibit_listings())
 
 def get_exhibits_ending_after_date(date):
   exhibits = filter(
     lambda x: x.get_through_date() >= date,
     _get_sorted_exhibit_listings()
     )
-  return exhibits[:LIMIT]
+  return _take_limit(exhibits)
+
+def _take_limit(exhibits):
+  desired = exhibits[:LIMIT]
+  last = desired[-1]
+
+  # Add on any that end on the same date (so we don't lose them in limit)
+  i = LIMIT
+  while i < len(exhibits) and \
+        exhibits[i].get_through_date() == last.get_through_date():
+    desired.append(exhibits[i])
+    i += 1
+
+  return desired
 
 def _get_sorted_exhibit_listings():
   return sorted(

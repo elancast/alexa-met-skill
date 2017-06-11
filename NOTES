@@ -7,3 +7,43 @@ Ask Met Exhibits
 
 remove "selections from"
 
+
+.bla {
+  background-color: red;
+  width: 512px;
+  text-align: center;
+  color: white;
+  font-family: "MetSerif","Georgia","Times New Roman",Times,serif;
+  letter-spacing: 1px;
+  font-size: 200px;
+  line-height: 512px;
+}
+
+.bla {
+  background-color: red;
+  width: 54px;
+  text-align: center;
+  color: white;
+  font-family: "MetSerif","Georgia","Times New Roman",Times,serif;
+  letter-spacing: 1px;
+  font-size: 20px;
+  line-height: 54px;
+}
+
+
+"""
+        'directives': [{
+            'type': 'Dialog.ElicitSlot',
+            'slotToElicit': DATE_SLOT_NAME,
+            'updatedIntent': {
+                 'name': INTENT_NAME,
+                 'confirmationStatus': 'NONE',
+                 'slots': {
+                      DATE_SLOT_NAME: {
+                           'name': DATE_SLOT_NAME,
+                           'confirmationStatus': 'NONE'
+                           }
+                      }
+                 }
+            }]
+"""
