@@ -76,7 +76,7 @@ def on_bad_date():
   return build_open_response(BAD_DATE_OUTPUT, BAD_DATE_REPROMPT)
 
 def on_help_intent():
-  return build_open_response(HELP_OUTPUT, HELP_REPROMPT)
+  return build_open_response(HELP_OUTPUT, HELP_REPROMPT, card=build_help_card())
 
 def on_launch_intent():
   return build_open_response(LAUNCH_OUTPUT, LAUNCH_REPROMPT)
@@ -114,20 +114,25 @@ def parse_date(date_text):
 def build_listings_response(listings, date=None):
   if len(listings) == 0:
     text = 'Sorry, there are no ongoing Met exhibits after that date.'
-    return build_simple_response(text)
+    return build_user_request_response(text, date, listings)
 
   listings_texts = map(lambda x: x.to_alexa_text(), listings)
   if len(listings_texts) > 1:
     listings_texts.insert(len(listings_texts) - 1, 'and')
 
   text = 'The next ending exhibits are %s' % ', '.join(listings_texts)
-  return build_simple_response(text)
+  return build_user_request_response(text, date, listings)
 
 def build_simple_response(text):
   speechlet = build_speechlet_response(TITLE, text)
   return build_response({}, speechlet)
 
-def build_open_response(output_text, reprompt_text):
+def build_user_request_response(text, user_date, listings):
+  card = build_card(user_date, listings)
+  speechlet = build_speechlet_response(TITLE, text, card=card)
+  return build_response({}, speechlet)
+
+def build_open_response(output_text, reprompt_text, card=None):
   return build_response(
     {},
     {
@@ -135,11 +140,7 @@ def build_open_response(output_text, reprompt_text):
              'type': 'PlainText',
              'text': output_text + ' ' + reprompt_text
              },
-        'card': {
-          'type': 'Simple',
-          'title': 'SessionSpeechlet',
-          'content': 'SessionSpeechlet'
-          },
+        'card': card,
         'reprompt': {
             'outputSpeech': {
                 'type': 'PlainText',
@@ -150,17 +151,13 @@ def build_open_response(output_text, reprompt_text):
         }
     )
 
-def build_speechlet_response(title, output):
+def build_speechlet_response(title, output, card=None):
   return {
     'outputSpeech': {
       'type': 'PlainText',
       'text': output
       },
-    'card': {
-      'type': 'Simple',
-      'title': 'SessionSpeechlet - ' + title,
-      'content': 'SessionSpeechlet - ' + output
-      },
+    'card': card,
     'reprompt': {
       'outputSpeech': {
         'type': 'PlainText',
@@ -176,6 +173,29 @@ def build_response(session_attributes, speechlet_response):
     'sessionAttributes': session_attributes,
     'response': speechlet_response
     }
+
+def build_card(user_date, listings):
+    if user_date:
+        date_text = datetime.datetime.strftime(user_date, '%b %d, %Y')
+        title = 'Exhibits Ending After %s' % date_text
+    else:
+        title = 'Exhibits Ending Next'
+
+    body_lines = ['The next ending exhibits are:']
+    body_lines += map(lambda x: x.to_display_text(), listings)
+
+    return {
+      'type': 'Simple',
+      'title': title,
+      'content': '\n'.join(body_lines)
+      }
+
+def build_help_card():
+    return {
+      'type': 'Simple',
+      'title': 'Met Exhibits Help',
+      'content': HELP_OUTPUT
+      }
 
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -194,6 +214,9 @@ def get_exhibits_ending_after_date(date):
   return _take_limit(exhibits)
 
 def _take_limit(exhibits):
+  if len(exhibits) == 0:
+    return exhibits
+
   desired = exhibits[:LIMIT]
   last = desired[-1]
 
@@ -233,12 +256,25 @@ class MetExhibitListing:
   def to_alexa_text(self):
     through_text = self._through_text
     title = self._title.lower()
+    title = self._get_stripped_title(title)
 
     # Remove the year
     if ',' in through_text:
       comma = through_text.index(',')
       through_text = through_text[:comma]
 
+    # Remove some common wordy titles
+    title = title.replace('selections from', ' ')
+    title = title.replace('.', ' ')
+
+    # Here we go!
+    return '%s ending on %s' % (title, through_text)
+
+  def to_display_text(self):
+    title = self._get_stripped_title(self._title)
+    return '* %s ends on %s' % (title, self._through_text)
+
+  def _get_stripped_title(self, title):
     # Remove any text in parens
     while '(' in title:
       start = title.index('(')
@@ -251,13 +287,7 @@ class MetExhibitListing:
       end = title.index('>', start + 1)
       title = title[:start] + ' ' + title[end + 1:]
 
-    # Remove some common wordy titles
-    title = title.replace('selections from', ' ')
-    title = title.replace('.', ' ')
-
-    # Here we go!
-    return '%s ending on %s' % (title, through_text)
-
+    return title.replace('  ', ' ').strip()
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 # Calling the Met API and converting it into Objects
